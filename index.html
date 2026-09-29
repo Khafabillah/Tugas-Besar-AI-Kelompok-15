@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Hex Arena — Duel vs NPC (Minimax / Alpha-Beta / Expectimax)</title>
+    <style>
+      :root {
+        --bg: #0e0f17;
+        --panel: #181a26;
+        --line: #2a2d40;
+        --text: #e9e9f0;
+        --sub: #8d90a8;
+        --player: #3fd8ff;
+        --npc: #ff4fa3;
+        --accent: #7ee08c;
+        --warn: #ffd166;
+        box-sizing: border-box;
+        padding-top: env(safe-area-inset-top, 0px);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      @media (prefers-color-scheme: light) {
+        :root:not([data-theme="dark"]) {
+          --bg: #eef0f8;
+          --panel: #fff;
+          --line: #dcdff0;
+          --text: #1b1c26;
+          --sub: #6b6e85;
+        }
+      }
+      :root[data-theme="dark"] {
+        --bg: #0e0f17;
+        --panel: #181a26;
+        --line: #2a2d40;
+        --text: #e9e9f0;
+        --sub: #8d90a8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+      }
+      .wrap {
+        max-width: 600px;
+        margin: 0 auto;
+        padding: 16px 14px 40px;
+      }
+      h1 {
+        font-size: 1.2rem;
+        margin: 2px 0;
+      }
+      .sub {
+        color: var(--sub);
+        font-size: 0.8rem;
+        margin-bottom: 10px;
+      }
+      .modebar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 8px;
+        font-size: 0.8rem;
+        color: var(--sub);
+      }
+      .tag {
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-weight: 700;
+        font-size: 0.75rem;
+        letter-spacing: 0.05em;
+        white-space: nowrap;
+      }
+      .tag.explore {
+        background: rgba(63, 216, 255, 0.15);
+        color: var(--player);
+      }
+      .tag.battle {
+        background: rgba(255, 79, 163, 0.18);
+        color: var(--npc);
+        animation: blink 1s infinite;
+      }
+      .tag.end {
+        background: rgba(126, 224, 140, 0.15);
+        color: var(--accent);
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0.55;
+        }
+      }
+      .arenaWrap {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+        background: #0b0c14;
+        box-shadow: 0 0 28px rgba(63, 216, 255, 0.08);
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+        touch-action: manipulation;
+        cursor: pointer;
+      }
+      .bars {
+        display: flex;
+        gap: 10px;
+        margin: 12px 0;
+      }
+      .card {
+        flex: 1;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px 12px;
+      }
+      .card h3 {
+        margin: 0 0 6px;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--sub);
+      }
+      .hpouter {
+        background: var(--line);
+        border-radius: 8px;
+        height: 10px;
+        overflow: hidden;
+      }
+      .hpinner {
+        height: 100%;
+        transition: width 0.35s ease;
+      }
+      .hpplayer .hpinner {
+        background: var(--player);
+      }
+      .hpnpc .hpinner {
+        background: var(--npc);
+      }
+      .hpval {
+        font-size: 0.78rem;
+        color: var(--sub);
+        margin-top: 5px;
+      }
+      .meta {
+        font-size: 0.72rem;
+        color: var(--sub);
+        margin-top: 2px;
+      }
+      .actions {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        margin: 10px 0;
+      }
+      button.act {
+        padding: 11px 8px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        font-size: 0.85rem;
+        cursor: pointer;
+      }
+      button.act:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+      }
+      button.act:not(:disabled):hover {
+        border-color: var(--accent);
+      }
+      .overlay {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 12px 14px;
+        margin-top: 8px;
+      }
+      .overlay h3 {
+        margin: 0 0 8px;
+        font-size: 0.85rem;
+      }
+      .hudEmpty {
+        font-size: 0.78rem;
+        color: var(--sub);
+      }
+      .candRow {
+        display: grid;
+        grid-template-columns: 116px 1fr 52px;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 0;
+        opacity: 0;
+        animation: rowIn 0.35s ease forwards;
+      }
+      .clabel {
+        font-size: 0.8rem;
+        white-space: nowrap;
+      }
+      .cbarOuter {
+        background: var(--line);
+        border-radius: 6px;
+        height: 14px;
+        overflow: hidden;
+      }
+      .cbarInner {
+        height: 100%;
+        width: 0;
+        border-radius: 6px;
+        transition: width 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+        background: linear-gradient(90deg, #5b5f78, #787d9c);
+      }
+      .candRow.best .cbarInner {
+        background: linear-gradient(90deg, #3fae63, var(--accent));
+      }
+      .candRow.best .clabel {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .cscore {
+        font-size: 0.76rem;
+        color: var(--sub);
+        text-align: right;
+      }
+      @keyframes rowIn {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      .statChips {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+      .chip {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 3px 9px;
+        font-size: 0.7rem;
+        color: var(--sub);
+      }
+      .chip b {
+        color: var(--text);
+      }
+      .controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 12px;
+        font-size: 0.78rem;
+        color: var(--sub);
+      }
+      select,
+      input[type="number"] {
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 3px 6px;
+      }
+      .log {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 8px 12px;
+        margin-top: 10px;
+        max-height: 140px;
+        overflow-y: auto;
+        font-size: 0.78rem;
+      }
+      .log div {
+        padding: 2px 0;
+        border-bottom: 1px dashed var(--line);
+      }
+      .endmsg {
+        font-weight: 700;
+        text-align: center;
+        padding: 10px;
+        margin-top: 10px;
+        border-radius: 10px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+      }
+      button#reset {
+        margin-top: 10px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        cursor: pointer;
+      }
+      .lab {
+        overflow-x: auto;
+      }
+      .lab .labBtns {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin: 8px 0;
+      }
+      .lab button.act {
+        padding: 7px 10px;
+        flex: none;
+      }
+      .lab table {
+        border-collapse: collapse;
+        font-size: 0.68rem;
+        width: 100%;
+        margin: 6px 0;
+      }
+      .lab td,
+      .lab th {
+        border: 1px solid var(--line);
+        padding: 3px 5px;
+        text-align: right;
+        white-space: nowrap;
+      }
+      .lab th {
+        color: var(--sub);
+      }
+      .lab h4 {
+        margin: 12px 0 2px;
+        font-size: 0.78rem;
+      }
+      .labNote {
+        font-size: 0.72rem;
+        color: var(--sub);
+        margin-bottom: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>⬡ Hex Arena — Duel vs NPC</h1>
+      <div class="sub">
+        Jelajahi arena heksagon. Bila NPC berada ≤ 2 hex dari player, tidak ada
+        yang di safezone,
+        <b>dan tidak ada pilar yang menghalangi garis pandang</b>, game masuk
+        <b>mode battle</b>. NPC memilih aksi dengan Minimax / Alpha-Beta /
+        Expectimax.
+      </div>
+      <div class="modebar">
+        <span id="modeTag" class="tag explore">🧭 EXPLORE</span
+        ><span id="hint"></span>
+      </div>
+      <div class="arenaWrap"><canvas id="cv"></canvas></div>
+
+      <div class="bars">
+        <div class="card hpplayer">
+          <h3>Player</h3>
+          <div class="hpouter">
+            <div class="hpinner" id="pBar" style="width: 100%"></div>
+          </div>
+          <div class="hpval" id="pVal"></div>
+          <div class="meta" id="pMeta"></div>
+        </div>
+        <div class="card hpnpc">
+          <h3>NPC</h3>
+          <div class="hpouter">
+            <div class="hpinner" id="nBar" style="width: 100%"></div>
+          </div>
+          <div class="hpval" id="nVal"></div>
+          <div class="meta" id="nMeta"></div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="act" id="btnAttack">⚔️ Attack (18)</button>
+        <button class="act" id="btnPower">🔥 Power Attack (32, CD 2)</button>
+        <button class="act" id="btnDefend">🛡️ Defend (-60%, +4 HP)</button>
+        <button class="act" id="btnPotion">🧪 Potion (+30 HP)</button>
+        <button class="act" id="btnTeleport" style="grid-column: 1/-1">
+          🌀 Teleport ke Safezone (HP ≤ 35, 1×, menggantikan Defend)
+        </button>
+      </div>
+
+      <div class="overlay">
+        <h3>🧠 AI Thinking — Debug Overlay NPC</h3>
+        <div class="hudEmpty" id="hudEmpty">
+          Belum ada keputusan. Masuk mode battle untuk melihat proses berpikir
+          NPC.
+        </div>
+        <div id="candRows"></div>
+        <div class="statChips" id="statChips"></div>
+      </div>
+
+      <div class="controls">
+        Algoritma:
+        <select id="algoSel">
+          <option value="alphabeta">Alpha-Beta</option>
+          <option value="minimax">Minimax</option>
+          <option value="expectimax">Expectimax</option>
+        </select>
+        Depth:
+        <select id="depthSel">
+          <option>1</option>
+          <option>2</option>
+          <option>3</option>
+          <option selected>4</option>
+          <option>5</option>
+          <option>6</option>
+        </select>
+        Eval:
+        <select id="evalSel">
+          <option>material</option>
+          <option selected>resource</option>
+          <option>aggressive</option>
+          <option>defensive</option>
+        </select>
+        Urutan:
+        <select id="orderSel">
+          <option value="fixed">Tetap</option>
+          <option value="best">Best-first</option>
+          <option value="worst">Worst-first</option>
+        </select>
+        Early stop:
+        <select id="earlySel">
+          <option value="0">Off</option>
+          <option value="150">≤150 node</option>
+          <option value="200">≤200 node</option>
+          <option value="600">≤600 node</option>
+        </select>
+        <label
+          ><input type="checkbox" id="stoch" /> Akurasi acak (attack 90% / power
+          70%)</label
+        >
+      </div>
+      <div class="log" id="log"></div>
+      <div id="endBox"></div>
+      <button id="reset">🔁 Game Baru</button>
+
+      <div class="overlay lab">
+        <h3>🔬 Lab Eksperimen</h3>
+        <div class="labNote">
+          Setiap tombol menjalankan simulasi NPC vs bot dengan
+          <b>Math.random() tanpa seed tetap</b> — state uji diambil dari
+          permainan acak, sehingga hasil dapat berbeda tiap kali dijalankan.
+          Naikkan jumlah pertandingan (N) untuk hasil yang lebih stabil.
+        </div>
+        <div class="controls" style="margin-top: 0">
+          Jumlah pertandingan per sel (N):
+          <input
+            type="number"
+            id="labN"
+            value="16"
+            min="4"
+            max="200"
+            style="width: 60px"
+          />
+        </div>
+        <div class="labBtns">
+          <button class="act" id="run_e1">E1 · Minimax vs Alpha-Beta</button>
+          <button class="act" id="run_e2">
+            E2/E5 · Fungsi Evaluasi &amp; Perilaku
+          </button>
+          <button class="act" id="run_e3">E3 · Urutan Aksi</button>
+          <button class="act" id="run_e4">E4 · Kedalaman</button>
+          <button class="act" id="run_e6">
+            E6 · Algoritma &amp; Probabilistik
+          </button>
+        </div>
+        <button class="act" id="copyLab" disabled>
+          📋 Salin semua hasil (Markdown)
+        </button>
+        <button class="act" id="clearLab">🗑️ Bersihkan</button>
+        <div id="labOut"></div>
+      </div>
+    </div>
+
+    <script src="engine.js"></script>
+    <script src="lab.js"></script>
+    <script src="ui.js"></script>
+  </body>
+</html>
