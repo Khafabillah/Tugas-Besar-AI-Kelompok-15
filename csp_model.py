@@ -57,13 +57,17 @@ class UnaryConstraint(Constraint):
 
 
 class ForbiddenAdjacencyConstraint(Constraint):
-    """Binary: dua kelompok terlarang tidak boleh bersebelahan di graf."""
+    """Binary: pasangan nilai terlarang tidak boleh bersebelahan di graf."""
     kind = "binary"
 
-    def __init__(self, edges: Sequence[Tuple[str, str]], forbidden_pair: Tuple[str, str]):
+    def __init__(self, edges: Sequence[Tuple[str, str]],
+                 forbidden_pairs: Sequence[Tuple[str, str]]):
         self.edges = list(edges)
         self._edge_set = {frozenset(e) for e in edges}
-        self.forbidden = frozenset(forbidden_pair)
+        self.forbidden = [frozenset(p) for p in forbidden_pairs]
+
+    def _bad(self, va, vb) -> bool:
+        return frozenset((va, vb)) in self.forbidden
 
     def violations(self, assignment):
         out = []
@@ -71,15 +75,13 @@ class ForbiddenAdjacencyConstraint(Constraint):
             va, vb = assignment.get(a), assignment.get(b)
             if va is None or vb is None:
                 continue
-            if frozenset((va, vb)) == self.forbidden:
+            if self._bad(va, vb):
                 out.append(Violation("binary", (a, b),
                                      f"{a} dan {b} bentrok! ({va} bersebelahan {vb})"))
         return out
 
     def pair_ok(self, a, va, b, vb):
-        if frozenset((a, b)) in self._edge_set and frozenset((va, vb)) == self.forbidden:
-            return False
-        return True
+        return not (frozenset((a, b)) in self._edge_set and self._bad(va, vb))
 
 
 class AtMostConstraint(Constraint):
@@ -157,10 +159,20 @@ class CSP:
     def pair_ok(self, a: str, va: str, b: str, vb: str) -> bool:
         return all(c.pair_ok(a, va, b, vb) for c in self.constraints)
 
-    def arcs(self) -> List[Tuple[str, str]]:
-        """Semua arc terarah. Karena global AtMost-1 didekomposisi ke semua
-        pasangan, setiap pasangan variabel punya relasi biner."""
-        return [(a, b) for a in self.variables for b in self.variables if a != b]
+    def constraint_graph(self, domains: Dict[str, List[str]]) -> Dict[str, Set[str]]:
+        """Graf constraint: a--b bila ADA pasangan nilai (x in D(a), y in D(b))
+        yang dilarang. Hanya pasangan ini yang perlu menjadi arc di AC-3
+        (global AtMost-1 menghubungkan semua variabel yang masih bisa bernilai Tamu)."""
+        graph: Dict[str, Set[str]] = {v: set() for v in self.variables}
+        for a in self.variables:
+            for b in self.variables:
+                if a != b and any(not self.pair_ok(a, x, b, y)
+                                  for x in domains[a] for y in domains[b]):
+                    graph[a].add(b)
+        return graph
+
+    def arcs(self, graph: Dict[str, Set[str]]) -> List[Tuple[str, str]]:
+        return [(a, b) for a in self.variables for b in self.variables if b in graph[a]]
 
     # ---------- domain ----------
     def initial_domains(self) -> Dict[str, List[str]]:
@@ -183,19 +195,19 @@ class CSP:
         return sum(1 for n in self.neighbors[var] if n not in assignment)
 
 
-SCENARIOS = ("standar", "utara_tamu")
+SCENARIOS = ("standar", "longgar")
 
 
 def build_stadium_csp(scenario: str = "standar") -> CSP:
-    """scenario 'utara_tamu' = skenario UJI opsional: Utara dipastikan Tamu
-    (constraint Unary tambahan) agar propagasi AC-3 terlihat bekerja."""
     adjacency, edges = build_ring_graph(cfg.RING_ORDER)
-    constraints: List[Constraint] = [
-        UnaryConstraint(cfg.VIP_SECTOR, [cfg.NETRAL]),                       # (b)
-        ForbiddenAdjacencyConstraint(edges, (cfg.TUAN_RUMAH, cfg.TAMU)),     # (a)
-        AtMostConstraint(cfg.TAMU, cfg.MAX_TAMU_SECTORS),                    # (c)
-    ]
-    if scenario == "utara_tamu":
-        constraints.append(UnaryConstraint("Utara", [cfg.TAMU]))
+    unary = cfg.UNARY_BY_SCENARIO[scenario]
+    constraints: List[Constraint] = [UnaryConstraint(v, unary[v]) for v in cfg.VARIABLES]  # (b)
+    constraints.append(ForbiddenAdjacencyConstraint(                                      # (a)
+        edges, [(cfg.TUAN_RUMAH, cfg.TAMU)]))
+    constraints.append(ForbiddenAdjacencyConstraint(                                      # (d)
+        edges, [(x, cfg.TAMU) for x in cfg.FORBIDDEN_PREMIUM_NEIGHBORS]))
+    constraints.append(AtMostConstraint(cfg.TAMU, cfg.MAX_TAMU_SECTORS))                  # (c)
     domains = {v: list(cfg.DOMAIN) for v in cfg.VARIABLES}
-    return CSP(cfg.VARIABLES, domains, cfg.RING_ORDER, adjacency, edges, constraints)
+    csp = CSP(cfg.VARIABLES, domains, cfg.RING_ORDER, adjacency, edges, constraints)
+    csp.scenario = scenario
+    return csp

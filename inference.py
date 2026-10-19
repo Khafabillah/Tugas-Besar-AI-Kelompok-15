@@ -32,9 +32,9 @@ def revise(csp: CSP, domains: Domains, xi: str, xj: str) -> List[str]:
     return removed
 
 
-def ac3(csp: CSP, domains: Domains, queue: Optional[Iterable[Tuple[str, str]]] = None):
+def ac3(csp: CSP, domains: Domains, graph, queue: Optional[Iterable[Tuple[str, str]]] = None):
     """AC-3 sebagai generator. `domains` dimodifikasi di tempat."""
-    q = deque(queue if queue is not None else csp.arcs())
+    q = deque(queue if queue is not None else csp.arcs(graph))
     while q:
         xi, xj = q.popleft()
         removed = revise(csp, domains, xi, xj)
@@ -45,14 +45,14 @@ def ac3(csp: CSP, domains: Domains, queue: Optional[Iterable[Tuple[str, str]]] =
                 return False
             # domain Xi berubah -> periksa ulang arc (Xk -> Xi) untuk semua Xk != Xj
             for xk in csp.variables:
-                if xk != xi and xk != xj and (xk, xi) not in q:
+                if xk in graph[xi] and xk != xj and (xk, xi) not in q:
                     q.append((xk, xi))
     return True
 
 
-def run_ac3(csp: CSP, domains: Domains, queue=None):
+def run_ac3(csp: CSP, domains: Domains, graph, queue=None):
     """Jalankan AC-3 sampai selesai. Return (ok, jumlah_arc, jumlah_nilai_dihapus)."""
-    gen = ac3(csp, domains, queue)
+    gen = ac3(csp, domains, graph, queue)
     arcs = removed = 0
     while True:
         try:

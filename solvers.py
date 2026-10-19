@@ -23,7 +23,7 @@ from heuristics import order_lcv, order_static, select_mrv, select_static
 from inference import ac3, run_ac3
 
 # Bobot delay per jenis langkah (dikali BASE_DELAY_MS)
-W_SELECT, W_ASSIGN, W_CLASH, W_BACK, W_ARC = 0.8, 1.0, 1.0, 1.0, 0.45
+W_SELECT, W_ASSIGN, W_CLASH, W_BACK, W_ARC = 0.8, 1.0, 1.0, 1.0, 0.3
 
 
 def short(values) -> str:
@@ -89,13 +89,20 @@ class BacktrackingSolver(Solver):
         logs = [("sys", f"[INIT] Stadion kosong. {hc.label} ({', '.join(flags)})")]
         if hc.node_consistency:
             domains, prune = csp.node_consistent_domains()
-            logs += [("info", f"[UNARY] {m}") for m in prune]
+            locked = sum(1 for v in csp.variables if len(domains[v]) == 1)
+            logs.append(("info", f"[UNARY] Node consistency: {len(prune)} domain dipangkas, "
+                                 f"{locked} variabel terkunci 1 nilai"))
         else:
             logs.append(("order", "[STATIC] Tanpa pruning: constraint Unary dicek saat assign."))
+        self.graph = {}
         if hc.use_ac3:
-            ok, arcs, removed = run_ac3(csp, domains)
+            self.graph = csp.constraint_graph(domains)
+            n_arcs = len(csp.arcs(self.graph))
+            ok, arcs, removed = run_ac3(csp, domains, self.graph)
             self.metrics.arc_checks += arcs
             self.metrics.removals += removed
+            logs.append(("ac3", f"[AC-3] Graf constraint: {n_arcs} arc "
+                                f"(hanya pasangan yang bisa melanggar)"))
             logs.append(("ac3", f"[AC-3] Preprocessing: {arcs} arc diperiksa, "
                                 f"{removed} nilai dihapus"))
         yield self._step(assignment, logs, domains=domains)
@@ -128,8 +135,9 @@ class BacktrackingSolver(Solver):
             logs = [("info", f"Memeriksa Tribun {var}..."),
                     ("mrv", f"[MRV] Memilih {var} ({n} sisa domain)")]
             if len(tied) > 1:
-                logs.append(("mrv", f"[MRV] Seri di {n} nilai: {', '.join(tied)} "
-                                    f"-> tie-break degree: {var}"))
+                who = ", ".join(tied) if len(tied) <= 4 else f"{len(tied)} variabel"
+                logs.append(("mrv", f"[MRV] Seri di {n} nilai ({who}) "
+                                    f"-> tie-break degree/urutan: {var}"))
         else:
             var = select_static(csp, assignment)
             logs = [("info", f"Memeriksa Tribun {var}..."),
@@ -190,8 +198,8 @@ class BacktrackingSolver(Solver):
             child = {v: list(d) for v, d in domains.items()}
             if hc.use_ac3:
                 child[var] = [value]
-                queue = [(xk, var) for xk in csp.variables if xk != var]
-                gen = ac3(csp, child, queue)
+                queue = [(xk, var) for xk in csp.variables if xk in self.graph[var]]
+                gen = ac3(csp, child, self.graph, queue)
                 ok, wiped = True, None
                 while True:
                     try:
@@ -247,7 +255,7 @@ BacktrackingSolver.BACKTRACK = BacktrackingSolver.backtrack   # alias sesuai spe
 # Local Search: Min-Conflicts
 # ======================================================================
 class MinConflictsSolver(Solver):
-    def __init__(self, csp: CSP, max_steps: int = 200, noise: float = 0.15,
+    def __init__(self, csp: CSP, max_steps: int = 400, noise: float = 0.15,
                  seed: Optional[int] = None):
         super().__init__(csp, "Local Search: Min-Conflicts")
         self.max_steps = max_steps

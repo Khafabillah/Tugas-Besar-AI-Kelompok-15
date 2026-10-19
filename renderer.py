@@ -16,7 +16,7 @@ from csp_model import CSP
 from events import ViewModel
 from solvers import MODE_LABELS
 
-NODE_R = 57
+NODE_R = 37
 LOG_LINE_H = 17
 
 
@@ -30,19 +30,24 @@ class Renderer:
         self.f_node = pygame.font.SysFont(sans, 15, bold=True)
         self.f_node_s = pygame.font.SysFont(sans, 14)
         self.f_small = pygame.font.SysFont(sans, 13)
-        self.f_chip = pygame.font.SysFont(sans, 12, bold=True)
+        self.f_chip = pygame.font.SysFont(sans, 11, bold=True)
+        self.f_tiny = pygame.font.SysFont(sans, 10)
+        self.f_lab = pygame.font.SysFont(sans, 11, bold=True)
         self.f_mono = pygame.font.SysFont(mono, 14)
         self.f_mono_b = pygame.font.SysFont(mono, 14, bold=True)
         self.char_w = max(1, self.f_mono.size("M")[0])
         self.positions = self._layout()
 
     def _layout(self):
-        cx, cy, rx, ry = cfg.LEFT_W / 2, 385, 240, 215
+        cx, cy, rx, ry = cfg.LEFT_W / 2, 392, 235, 218
         self.center = (cx, cy)
         order = self.csp.ring_order
-        pos = {}
+        step = 360 / len(order)
+        start_angle = 180 - (6 - 1) / 2 * step     # 6 zona Barat berpusat di sisi kiri
+        pos, self.angles = {}, {}
         for i, name in enumerate(order):
-            ang = math.radians(-90 + i * 360 / len(order))
+            ang = math.radians(start_angle + i * step)
+            self.angles[name] = ang
             pos[name] = (cx + rx * math.cos(ang), cy + ry * math.sin(ang))
         return pos
 
@@ -67,19 +72,29 @@ class Renderer:
         cx, cy = self.center
         blink = (pygame.time.get_ticks() // 350) % 2 == 0
 
-        self._text("KEAMANAN TRIBUN STADION - CSP", self.f_title, (236, 239, 241),
+        self._text("KEAMANAN TRIBUN STADION - 16 SUB-ZONA", self.f_title, (236, 239, 241),
                    (cfg.LEFT_W / 2, 26))
         if vm.finished:
             txt, col = (("SOLUSI VALID", (105, 240, 174)) if vm.success
                         else ("GAGAL MENEMUKAN SOLUSI", (255, 138, 128)))
-            self._text(txt, self.f_node, col, (cfg.LEFT_W / 2, 56))
+            self._text(txt, self.f_node, col, (cfg.LEFT_W / 2, 54))
 
         # lapangan
-        pitch = pygame.Rect(cx - 120, cy - 70, 240, 140)
+        pitch = pygame.Rect(cx - 110, cy - 62, 220, 124)
         pygame.draw.rect(s, (27, 94, 32), pitch, border_radius=8)
         pygame.draw.rect(s, (165, 214, 167), pitch, 2, border_radius=8)
-        pygame.draw.line(s, (165, 214, 167), (cx, cy - 70), (cx, cy + 70), 2)
-        pygame.draw.circle(s, (165, 214, 167), (int(cx), int(cy)), 26, 2)
+        pygame.draw.line(s, (165, 214, 167), (cx, cy - 62), (cx, cy + 62), 2)
+        pygame.draw.circle(s, (165, 214, 167), (int(cx), int(cy)), 24, 2)
+
+        # label sektor besar (di dalam cincin)
+        groups = {}
+        for name in self.csp.variables:
+            groups.setdefault(cfg.ZONE_SECTOR[name], []).append(self.positions[name])
+        for label, pts in groups.items():
+            mx = sum(p[0] for p in pts) / len(pts)
+            my = sum(p[1] for p in pts) / len(pts)
+            lx, ly = cx + (mx - cx) * 0.68, cy + (my - cy) * 0.68
+            self._text(label, self.f_small, (96, 125, 139), (lx, ly))
 
         violations = self.csp.all_violations(vm.assignment)
         clashing, bad_pairs = set(), set()
@@ -88,7 +103,6 @@ class Renderer:
             if v.kind == "binary":
                 bad_pairs.add(frozenset(v.variables))
 
-        # edge graf
         for a, b in self.csp.edges:
             pa, pb = self.positions[a], self.positions[b]
             if frozenset((a, b)) in bad_pairs:
@@ -96,30 +110,26 @@ class Renderer:
             else:
                 pygame.draw.line(s, (84, 110, 122), pa, pb, 2)
 
-        # arc AC-3 yang sedang diperiksa
         if vm.arc:
             self._draw_arc(vm.arc[0], vm.arc[1])
 
-        # node
         for name in self.csp.variables:
             self._draw_node(vm, name, name in clashing, blink)
 
         # legenda & aturan
         for i, g in enumerate(cfg.DOMAIN):
-            x = 40 + i * 165
-            pygame.draw.rect(s, cfg.GROUP_COLORS[g], (x, cfg.WINDOW_H - 62, 18, 18),
+            x = 22 + i * 140
+            pygame.draw.rect(s, cfg.GROUP_COLORS[g], (x, cfg.WINDOW_H - 60, 16, 16),
                              border_radius=4)
             self._text(f"{g.replace('_', ' ')} ({cfg.SHORT_NAMES[g]})", self.f_small,
-                       (207, 216, 220), (x + 26, cfg.WINDOW_H - 53), "midleft")
-        rules = ("Aturan: (a) Tuan Rumah tidak bersebelahan dgn Tamu  "
-                 "(b) Barat VIP = Netral  (c) maks 1 Tamu")
-        self._text(rules, self.f_small, (120, 144, 156), (cfg.LEFT_W / 2, cfg.WINDOW_H - 32))
-        extra = "   + skenario uji: Utara wajib Tamu" if self._has_extra() else ""
-        self._text(f"Total konflik: {self.csp.total_conflicts(vm.assignment)}{extra}",
-                   self.f_small, (236, 239, 241), (cfg.LEFT_W / 2, cfg.WINDOW_H - 12))
-
-    def _has_extra(self):
-        return sum(1 for c in self.csp.constraints if c.kind == "unary") > 1
+                       (207, 216, 220), (x + 22, cfg.WINDOW_H - 52), "midleft")
+        self._text("(a) Tuan Rumah tidak bersebelahan dgn Tamu   (b) tiap zona punya domain unary",
+                   self.f_small, (120, 144, 156), (cfg.LEFT_W / 2, cfg.WINDOW_H - 34))
+        self._text("(c) maks 1 sektor Tamu   (d) VIP/Media tidak bersebelahan dgn Tamu",
+                   self.f_small, (120, 144, 156), (cfg.LEFT_W / 2, cfg.WINDOW_H - 19))
+        self._text(f"Skenario: {getattr(self.csp, 'scenario', '-')}  |  "
+                   f"Total konflik: {self.csp.total_conflicts(vm.assignment)}",
+                   self.f_small, (236, 239, 241), (cfg.LEFT_W / 2, cfg.WINDOW_H - 4), "midbottom")
 
     def _draw_arc(self, xi, xj):
         s = self.screen
@@ -132,9 +142,9 @@ class Renderer:
         col = (255, 213, 79)
         pygame.draw.line(s, col, start, tip, 4)
         px, py = -uy, ux
-        base = (tip[0] - ux * 16, tip[1] - uy * 16)
-        pygame.draw.polygon(s, col, [tip, (base[0] + px * 8, base[1] + py * 8),
-                                     (base[0] - px * 8, base[1] - py * 8)])
+        base = (tip[0] - ux * 14, tip[1] - uy * 14)
+        pygame.draw.polygon(s, col, [tip, (base[0] + px * 7, base[1] + py * 7),
+                                     (base[0] - px * 7, base[1] - py * 7)])
 
     def _draw_node(self, vm: ViewModel, name: str, clash: bool, blink: bool):
         s = self.screen
@@ -145,47 +155,61 @@ class Renderer:
         txt_col = cfg.GROUP_TEXT_COLORS.get(group, (207, 216, 220))
 
         if vm.current == name:
-            pygame.draw.circle(s, (0, 229, 255), (ix, iy), NODE_R + 9, 3)
+            pygame.draw.circle(s, (0, 229, 255), (ix, iy), NODE_R + 6, 3)
         if vm.arc and name == vm.arc[0]:
-            pygame.draw.circle(s, (255, 213, 79), (ix, iy), NODE_R + 14, 3)
+            pygame.draw.circle(s, (255, 213, 79), (ix, iy), NODE_R + 10, 3)
         if vm.flash == name:
-            pygame.draw.circle(s, (255, 112, 67), (ix, iy), NODE_R + 20, 4)
+            pygame.draw.circle(s, (255, 112, 67), (ix, iy), NODE_R + 14, 4)
 
         pygame.draw.circle(s, fill, (ix, iy), NODE_R)
         if clash:
-            outline, width = ((255, 23, 68) if blink else (255, 255, 255)), 7
+            outline, width = ((255, 23, 68) if blink else (255, 255, 255)), 6
         elif vm.finished and vm.success:
-            outline, width = (105, 240, 174), 4
+            outline, width = (105, 240, 174), 3
         else:
             outline, width = (144, 164, 174), 2
         pygame.draw.circle(s, outline, (ix, iy), NODE_R, width)
 
-        self._text(name.replace("_", " "), self.f_node, txt_col, (x, y - 9))
-        self._text(group.replace("_", " ") if group else "kosong", self.f_node_s,
-                   txt_col, (x, y + 11))
+        self._text(f"#{cfg.ZONE_NUMBER[name]}", self.f_tiny, txt_col, (x, y - 17))
+        self._text(cfg.ZONE_LABEL[name], self.f_lab, txt_col, (x, y - 3))
+        self._text(group.replace("_", " ") if group else "kosong", self.f_tiny,
+                   txt_col, (x, y + 13))
 
-        top = y - NODE_R - 14
-        if name == cfg.VIP_SECTOR:
-            self._text("VIP (wajib Netral)", self.f_small, (253, 216, 53), (x, top))
-            top -= 15
-        if clash:
-            self._text("CLASH!", self.f_node, (255, 82, 82), (x, top))
+        if clash:   # penanda CLASH di sisi dalam cincin
+            cx, cy = self.center
+            ux, uy = (cx - x), (cy - y)
+            d = math.hypot(ux, uy) or 1
+            self._text("CLASH!", self.f_chip, (255, 82, 82),
+                       (x + ux / d * (NODE_R + 14), y + uy / d * (NODE_R + 14)))
 
-        # sisa domain legal (chip kecil) di bawah node
+        # sisa domain (chip) di sisi luar cincin
         if name not in vm.assignment and name in vm.domains:
-            self._draw_domain_chips(vm.domains[name], x, y + NODE_R + 16)
+            self._draw_domain_chips(vm.domains[name], name, x, y)
 
-    def _draw_domain_chips(self, values, x, y):
+    def _draw_domain_chips(self, values, name, x, y):
+        ang = self.angles[name]
+        ux, uy = math.cos(ang), math.sin(ang)
+        cw, ch, gap, cols = 24, 15, 3, 3
         if not values:
-            self._text("DOMAIN KOSONG", self.f_chip, (255, 82, 82), (x, y))
+            bw, bh = 80, 15
+        else:
+            rows = [values[i:i + cols] for i in range(0, len(values), cols)]
+            bw = min(len(values), cols) * cw + (min(len(values), cols) - 1) * gap
+            bh = len(rows) * ch + (len(rows) - 1) * gap
+        ccx = x + ux * (NODE_R + 8 + bw / 2 * abs(ux))
+        ccy = y + uy * (NODE_R + 8 + bh / 2 * abs(uy))
+        if not values:
+            self._text("DOMAIN KOSONG", self.f_chip, (255, 82, 82), (ccx, ccy))
             return
-        w, gap = 30, 4
-        total = len(values) * w + (len(values) - 1) * gap
-        left = x - total / 2
-        for i, v in enumerate(values):
-            rect = pygame.Rect(int(left + i * (w + gap)), int(y - 9), w, 18)
-            pygame.draw.rect(self.screen, cfg.GROUP_COLORS[v], rect, border_radius=5)
-            self._text(cfg.SHORT_NAMES[v], self.f_chip, cfg.GROUP_TEXT_COLORS[v], rect.center)
+        top = ccy - bh / 2
+        for r, row in enumerate(rows):
+            rw = len(row) * cw + (len(row) - 1) * gap
+            left = ccx - rw / 2
+            for i, v in enumerate(row):
+                rect = pygame.Rect(int(left + i * (cw + gap)), int(top + r * (ch + gap)), cw, ch)
+                pygame.draw.rect(self.screen, cfg.GROUP_COLORS[v], rect, border_radius=4)
+                self._text(cfg.SHORT_NAMES[v], self.f_chip, cfg.GROUP_TEXT_COLORS[v],
+                           rect.center)
 
     # ------------------------------------------------------------------
     # KANAN: live debug
@@ -243,7 +267,7 @@ class Renderer:
         hy = log_bottom + 6
         for t in ("[1] MinConf [2] Naif [3] +MRV [4] +LCV [5] +AC-3",
                   "[R] Reset  [Spasi] Pause  [N] 1 langkah  [+/-] Kecepatan",
-                  "[O] Urutan nilai  [S] Skenario uji  [Roda] Scroll log",
+                  "[O] Urutan nilai  [S] Skenario  [Roda] Scroll log",
                   "[Esc] Keluar"):
             self._text(t, self.f_mono, (120, 144, 156), (px, hy), "topleft")
             hy += LOG_LINE_H
