@@ -183,12 +183,19 @@ class CSP:
         return sum(1 for n in self.neighbors[var] if n not in assignment)
 
 
-def build_stadium_csp() -> CSP:
+SCENARIOS = ("standar", "utara_tamu")
+
+
+def build_stadium_csp(scenario: str = "standar") -> CSP:
+    """scenario 'utara_tamu' = skenario UJI opsional: Utara dipastikan Tamu
+    (constraint Unary tambahan) agar propagasi AC-3 terlihat bekerja."""
     adjacency, edges = build_ring_graph(cfg.RING_ORDER)
     constraints: List[Constraint] = [
         UnaryConstraint(cfg.VIP_SECTOR, [cfg.NETRAL]),                       # (b)
         ForbiddenAdjacencyConstraint(edges, (cfg.TUAN_RUMAH, cfg.TAMU)),     # (a)
         AtMostConstraint(cfg.TAMU, cfg.MAX_TAMU_SECTORS),                    # (c)
     ]
+    if scenario == "utara_tamu":
+        constraints.append(UnaryConstraint("Utara", [cfg.TAMU]))
     domains = {v: list(cfg.DOMAIN) for v in cfg.VARIABLES}
     return CSP(cfg.VARIABLES, domains, cfg.RING_ORDER, adjacency, edges, constraints)
