@@ -17,7 +17,7 @@ from events import ViewModel
 from solvers import MODE_LABELS
 
 NODE_R = 37
-LOG_LINE_H = 17
+LOG_LINE_H = 19
 
 
 class Renderer:
@@ -29,14 +29,17 @@ class Renderer:
         self.f_title = pygame.font.SysFont(sans, 22, bold=True)
         self.f_node = pygame.font.SysFont(sans, 15, bold=True)
         self.f_node_s = pygame.font.SysFont(sans, 14)
-        self.f_small = pygame.font.SysFont(sans, 13)
+        self.f_small = pygame.font.SysFont(sans, 14)
         self.f_chip = pygame.font.SysFont(sans, 11, bold=True)
-        self.f_tiny = pygame.font.SysFont(sans, 10)
-        self.f_lab = pygame.font.SysFont(sans, 11, bold=True)
-        self.f_mono = pygame.font.SysFont(mono, 14)
-        self.f_mono_b = pygame.font.SysFont(mono, 14, bold=True)
+        self.f_tiny = pygame.font.SysFont(sans, 11)
+        self.f_lab = pygame.font.SysFont(sans, 12, bold=True)
+        self.f_button = pygame.font.SysFont(sans, 12, bold=True)
+        self.f_mono = pygame.font.SysFont(mono, 15)
+        self.f_mono_b = pygame.font.SysFont(mono, 15, bold=True)
         self.char_w = max(1, self.f_mono.size("M")[0])
         self.positions = self._layout()
+        self.control_rects = {}
+        self.mouse_position = (-1, -1)
 
     def _layout(self):
         cx, cy, rx, ry = cfg.LEFT_W / 2, 392, 235, 218
@@ -70,14 +73,15 @@ class Renderer:
     def _draw_left(self, vm: ViewModel):
         s = self.screen
         cx, cy = self.center
-        blink = (pygame.time.get_ticks() // 350) % 2 == 0
-
         self._text("KEAMANAN TRIBUN STADION - 16 SUB-ZONA", self.f_title, (236, 239, 241),
                    (cfg.LEFT_W / 2, 26))
+        self._text(f"Skenario: {getattr(self.csp, 'scenario', '-')}  |  "
+                   f"Konflik saat ini: {self.csp.total_conflicts(vm.assignment, count=False)}",
+                   self.f_small, (207, 216, 220), (cfg.LEFT_W / 2, 57))
         if vm.finished:
             txt, col = (("SOLUSI VALID", (105, 240, 174)) if vm.success
                         else ("GAGAL MENEMUKAN SOLUSI", (255, 138, 128)))
-            self._text(txt, self.f_node, col, (cfg.LEFT_W / 2, 54))
+            self._text(txt, self.f_node, col, (cfg.LEFT_W / 2, 83))
 
         # lapangan
         pitch = pygame.Rect(cx - 110, cy - 62, 220, 124)
@@ -114,7 +118,7 @@ class Renderer:
             self._draw_arc(vm.arc[0], vm.arc[1])
 
         for name in self.csp.variables:
-            self._draw_node(vm, name, name in clashing, blink)
+            self._draw_node(vm, name, name in clashing)
 
         # legenda & aturan
         for i, g in enumerate(cfg.DOMAIN):
@@ -124,13 +128,9 @@ class Renderer:
             self._text(f"{g.replace('_', ' ')} ({cfg.SHORT_NAMES[g]})", self.f_small,
                        (207, 216, 220), (x + 22, cfg.WINDOW_H - 52), "midleft")
         self._text("(a) Tuan Rumah tidak bersebelahan dgn Tamu   (b) tiap zona punya domain unary",
-                   self.f_small, (120, 144, 156), (cfg.LEFT_W / 2, cfg.WINDOW_H - 34))
+                   self.f_small, (120, 144, 156), (cfg.LEFT_W / 2, cfg.WINDOW_H - 32))
         self._text("(c) maks 1 sektor Tamu   (d) VIP/Media tidak bersebelahan dgn Tamu",
-                   self.f_small, (120, 144, 156), (cfg.LEFT_W / 2, cfg.WINDOW_H - 19))
-        self._text(f"Skenario: {getattr(self.csp, 'scenario', '-')}  |  "
-                   f"Total konflik: {self.csp.total_conflicts(vm.assignment)}",
-                   self.f_small, (236, 239, 241), (cfg.LEFT_W / 2, cfg.WINDOW_H - 4), "midbottom")
-
+                   self.f_small, (120, 144, 156), (cfg.LEFT_W / 2, cfg.WINDOW_H - 12))
     def _draw_arc(self, xi, xj):
         s = self.screen
         pi, pj = self.positions[xi], self.positions[xj]
@@ -146,7 +146,7 @@ class Renderer:
         pygame.draw.polygon(s, col, [tip, (base[0] + px * 7, base[1] + py * 7),
                                      (base[0] - px * 7, base[1] - py * 7)])
 
-    def _draw_node(self, vm: ViewModel, name: str, clash: bool, blink: bool):
+    def _draw_node(self, vm: ViewModel, name: str, clash: bool):
         s = self.screen
         x, y = self.positions[name]
         ix, iy = int(x), int(y)
@@ -155,7 +155,7 @@ class Renderer:
         txt_col = cfg.GROUP_TEXT_COLORS.get(group, (207, 216, 220))
 
         if vm.current == name:
-            pygame.draw.circle(s, (0, 229, 255), (ix, iy), NODE_R + 6, 3)
+            pygame.draw.circle(s, (0, 229, 255), (ix, iy), NODE_R + 6, 4)
         if vm.arc and name == vm.arc[0]:
             pygame.draw.circle(s, (255, 213, 79), (ix, iy), NODE_R + 10, 3)
         if vm.flash == name:
@@ -163,7 +163,7 @@ class Renderer:
 
         pygame.draw.circle(s, fill, (ix, iy), NODE_R)
         if clash:
-            outline, width = ((255, 23, 68) if blink else (255, 255, 255)), 6
+            outline, width = (255, 55, 75), 5
         elif vm.finished and vm.success:
             outline, width = (105, 240, 174), 3
         else:
@@ -222,6 +222,7 @@ class Renderer:
         pygame.draw.line(s, (48, 54, 61), (x0, 0), (x0, cfg.WINDOW_H), 2)
         px = x0 + 14
         y = 12
+        self.control_rects = {}
 
         def header(text):
             nonlocal y
@@ -234,43 +235,149 @@ class Renderer:
             y += LOG_LINE_H
 
         m = vm.metrics
-        header("LIVE DEBUG")
-        line(f"Mode      : {vm.mode_label}")
-        line(f"Status    : {vm.status}")
-        line(f"Iterasi   : {m.iterations:<5} Clash     : {m.clashes}")
-        line(f"Backtrack : {m.backtracks:<5} Arc dicek : {m.arc_checks} (hapus {m.removals})")
-        line(f"Dievaluasi: {vm.focus or '-'}", (128, 222, 234))
-        line(f"Kecepatan : {vm.delay_ms} ms | urutan nilai statis: {vm.value_order}",
-             (176, 190, 197))
-        y += 6
+        header("LANGKAH AKTIF")
+        card = pygame.Rect(px - 6, y - 3, w - 16, 78)
+        pygame.draw.rect(s, (23, 34, 45), card, border_radius=8)
+        pygame.draw.rect(s, (54, 78, 94), card, 1, border_radius=8)
+        status_color = ((105, 240, 174) if vm.finished and vm.success else
+                        (255, 138, 128) if vm.finished else
+                        (255, 213, 79) if "PAUSE" in vm.status else (128, 222, 234))
+        self._text(vm.status or "Siap", self.f_mono_b, status_color,
+                   (px + 7, y + 4), "topleft")
+        y += 24
+        mode_text = self._fit(f"Mode: {vm.mode_label or 'belum dipilih'}", self.f_mono,
+                              w - 42)
+        self._text(mode_text, self.f_mono, (207, 216, 220), (px + 7, y), "topleft")
+        y += 20
+        focus_text = self._fit(f"Fokus: {vm.focus or 'menunggu algoritma'}", self.f_mono,
+                               w - 42)
+        self._text(focus_text, self.f_mono, (128, 222, 234), (px + 7, y), "topleft")
+        y += 35
 
-        header("PERBANDINGAN (run terakhir tiap mode)")
-        line(f"{'Mode':<16}{'Iter':>5}{'Clash':>6}{'Back':>6}{'Arc':>5}  OK",
+        header("METRIK PENCARIAN")
+        if vm.mode_label.startswith("[1]"):
+            conflict_label = f"Sisa konflik: {self.csp.total_conflicts(vm.assignment, count=False)}"
+        else:
+            conflict_label = f"Clash: {m.clashes}"
+        line(f"Iterasi: {m.iterations:<7} {conflict_label}")
+        line(f"Backtrack: {m.backtracks:<5} AC-3: {m.arc_checks} cek / {m.removals} hapus")
+        line(f"Jeda: {vm.delay_ms} ms   Urutan nilai: {vm.value_order}", (176, 190, 197))
+        y += 5
+
+        header("KONTROL & ALGORITMA")
+        content_w = w - 28
+        gap = 5
+        button_h = 29
+        self._text("Pilihan tunggal 1-6  |  kombinasi 7-8", self.f_lab,
+                   (144, 164, 174), (px, y), "topleft")
+        y += 16
+        mode_labels = ["[1] Min-Conf", "[2] Naif+NC", "[3] MRV", "[4] LCV",
+                       "[5] FC", "[6] MAC/AC-3", "[7] MRV+LCV", "[8] MRV+LCV+MAC"]
+        button_w = (content_w - gap * 3) // 4
+        for i, label in enumerate(mode_labels):
+            row, col = divmod(i, 4)
+            rect = pygame.Rect(px + col * (button_w + gap),
+                               y + row * (button_h + gap), button_w, button_h)
+            mode = i + 1
+            self._button(f"mode_{mode}", label, rect,
+                         active=vm.mode_label.startswith(f"[{mode}]"))
+        y += 2 * (button_h + gap)
+
+        transport = [
+            ("reset", "[R] Reset", "neutral"),
+            ("pause", "[Spasi] Lanjut" if "PAUSE" in vm.status else "[Spasi] Jeda",
+             "selected" if "PAUSE" in vm.status else "neutral"),
+            ("step", "[N] Langkah", "neutral"),
+            ("slower", "[-] Lambat", "neutral"),
+            ("faster", "[+] Cepat", "neutral"),
+        ]
+        button_w = (content_w - gap * 4) // 5
+        for i, (action, label, kind) in enumerate(transport):
+            rect = pygame.Rect(px + i * (button_w + gap), y, button_w, button_h)
+            enabled = action not in ("pause", "step") or self._control_enabled(action, vm)
+            self._button(action, label, rect, kind=kind, enabled=enabled)
+        y += button_h + gap
+
+        setting_w = (content_w - gap) // 2
+        settings = [
+            ("scenario", f"[S] Skenario: {getattr(self.csp, 'scenario', '-')}", "neutral"),
+            ("order", f"[O] Urutan: {vm.value_order}", "neutral"),
+        ]
+        for i, (action, label, kind) in enumerate(settings):
+            rect = pygame.Rect(px + i * (setting_w + gap), y, setting_w, button_h)
+            self._button(action, label, rect, kind=kind)
+        y += button_h + 7
+
+        y += 7
+
+        header("PERBANDINGAN — RUN TERAKHIR")
+        line("BT: clash = assignment ditolak | MinConf: konflik tersisa pada akhir",
              (176, 190, 197))
-        for key in range(1, 6):
+        line(f"{'Mode':<16}{'Step':>5}{'Konflik':>7}{'Back':>6}{'Arc':>5}  OK",
+             (176, 190, 197))
+        for key in range(1, len(MODE_LABELS) + 1):
             r = vm.results.get(key)
             label = f"[{key}] {MODE_LABELS[key]}"[:16]
+            if vm.mode_label.startswith(f"[{key}]"):
+                pygame.draw.rect(s, (24, 43, 55), (px - 4, y - 1, w - 26, LOG_LINE_H),
+                                 border_radius=4)
             if r is None:
                 line(f"{label:<16}{'-':>5}{'-':>6}{'-':>6}{'-':>5}", (96, 108, 118))
             else:
                 mm = r.metrics
-                line(f"{label:<16}{mm.iterations:>5}{mm.clashes:>6}{mm.backtracks:>6}"
+                if key == 1:
+                    final_conflicts = ("-" if r.final_conflicts is None
+                                       else str(r.final_conflicts))
+                    line(f"{label:<16}{mm.iterations:>5}{final_conflicts:>7}{'-':>6}{'-':>5}"
+                         f"  {'ya' if r.success else 'TIDAK'}",
+                         (105, 240, 174) if r.success else (255, 138, 128))
+                    continue
+                line(f"{label:<16}{mm.iterations:>5}{mm.clashes:>7}{mm.backtracks:>6}"
                      f"{mm.arc_checks:>5}  {'ya' if r.success else 'TIDAK'}",
                      (105, 240, 174) if r.success else (255, 138, 128))
         y += 6
 
-        header("LOG ALGORITMA")
-        help_h = 4 * LOG_LINE_H + 12
-        log_bottom = cfg.WINDOW_H - help_h
+        header("LOG ALGORITMA  (scroll dengan roda mouse)")
+        log_bottom = cfg.WINDOW_H - 14
         self._draw_log(vm, px, y, w - 28, log_bottom)
 
-        hy = log_bottom + 6
-        for t in ("[1] MinConf [2] Naif [3] +MRV [4] +LCV [5] +AC-3",
-                  "[R] Reset  [Spasi] Pause  [N] 1 langkah  [+/-] Kecepatan",
-                  "[O] Urutan nilai  [S] Skenario  [Roda] Scroll log",
-                  "[Esc] Keluar"):
-            self._text(t, self.f_mono, (120, 144, 156), (px, hy), "topleft")
-            hy += LOG_LINE_H
+    def _fit(self, text, font, max_width):
+        if font.size(text)[0] <= max_width:
+            return text
+        suffix = "…"
+        while text and font.size(text + suffix)[0] > max_width:
+            text = text[:-1]
+        return text + suffix
+
+    @staticmethod
+    def _control_enabled(action, vm):
+        if action == "pause":
+            return vm.status.startswith("Berjalan") or "PAUSE" in vm.status
+        if action == "step":
+            return "PAUSE" in vm.status
+        return True
+
+    def _button(self, action, label, rect, kind="neutral", active=False, enabled=True):
+        self.control_rects[action] = rect.copy()
+        hovered = rect.collidepoint(self.mouse_position)
+        if not enabled:
+            fill, border, txt = (25, 30, 36), (47, 55, 63), (100, 110, 118)
+        elif active or kind == "selected":
+            fill, border, txt = (21, 74, 91), (0, 188, 212), (224, 247, 250)
+        elif hovered:
+            fill, border, txt = (48, 63, 75), (128, 222, 234), (245, 248, 250)
+        else:
+            fill, border, txt = (31, 40, 49), (69, 83, 94), (207, 216, 220)
+        pygame.draw.rect(self.screen, fill, rect, border_radius=6)
+        pygame.draw.rect(self.screen, border, rect, 1, border_radius=6)
+        label = self._fit(label, self.f_button, rect.width - 8)
+        self._text(label, self.f_button, txt, rect.center)
+
+    def action_at(self, position):
+        for action, rect in self.control_rects.items():
+            if rect.collidepoint(position):
+                return action
+        return None
 
     def _draw_log(self, vm: ViewModel, x, top, width, bottom):
         pygame.draw.rect(self.screen, (11, 15, 20), (x - 6, top - 2, width + 12, bottom - top))

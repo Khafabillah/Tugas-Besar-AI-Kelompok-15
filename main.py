@@ -2,9 +2,10 @@
 main.py - Entry point.   Jalankan:  python main.py
 
 Tombol:
-  1  Local Search Min-Conflicts          2  Backtracking Naif (baseline)
-  3  Backtracking + MRV                  4  Backtracking + MRV + LCV
-  5  Backtracking + MRV + LCV + AC-3
+  1  Min-Conflicts                       2  Backtracking Naif + NC (baseline)
+  3  Backtracking + MRV                  4  Backtracking + LCV
+  5  Backtracking + Forward Checking     6  Backtracking + MAC/AC-3
+  7  MRV + LCV                           8  MRV + LCV + MAC/AC-3
   R reset | Spasi pause | N 1 langkah | +/- kecepatan | O urutan nilai | S skenario uji
 """
 

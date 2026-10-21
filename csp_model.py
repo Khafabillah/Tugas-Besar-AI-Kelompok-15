@@ -31,9 +31,10 @@ class Violation:
 
 class Constraint(ABC):
     kind = "generic"
+    pairwise = False
 
     @abstractmethod
-    def violations(self, assignment: Assignment) -> List[Violation]:
+    def violations(self, assignment: Assignment, counter=None) -> List[Violation]:
         """Semua pelanggaran pada assignment (variabel kosong diabaikan)."""
 
     def pair_ok(self, a: str, va: str, b: str, vb: str) -> bool:
@@ -48,9 +49,13 @@ class UnaryConstraint(Constraint):
         self.variable = variable
         self.allowed = tuple(allowed)
 
-    def violations(self, assignment):
+    def violations(self, assignment, counter=None):
         value = assignment.get(self.variable)
-        if value is None or value in self.allowed:
+        if value is None:
+            return []
+        if counter is not None:
+            counter["constraint_checks"] += 1
+        if value in self.allowed:
             return []
         return [Violation("unary", (self.variable,),
                           f"{self.variable} wajib {'/'.join(self.allowed)}, bukan {value}!")]
@@ -59,6 +64,7 @@ class UnaryConstraint(Constraint):
 class ForbiddenAdjacencyConstraint(Constraint):
     """Binary: pasangan nilai terlarang tidak boleh bersebelahan di graf."""
     kind = "binary"
+    pairwise = True
 
     def __init__(self, edges: Sequence[Tuple[str, str]],
                  forbidden_pairs: Sequence[Tuple[str, str]]):
@@ -69,12 +75,14 @@ class ForbiddenAdjacencyConstraint(Constraint):
     def _bad(self, va, vb) -> bool:
         return frozenset((va, vb)) in self.forbidden
 
-    def violations(self, assignment):
+    def violations(self, assignment, counter=None):
         out = []
         for a, b in self.edges:
             va, vb = assignment.get(a), assignment.get(b)
             if va is None or vb is None:
                 continue
+            if counter is not None:
+                counter["constraint_checks"] += 1
             if self._bad(va, vb):
                 out.append(Violation("binary", (a, b),
                                      f"{a} dan {b} bentrok! ({va} bersebelahan {vb})"))
@@ -88,12 +96,16 @@ class AtMostConstraint(Constraint):
     """Global: nilai tertentu muncul maksimal `limit` kali."""
     kind = "global"
 
-    def __init__(self, value: str, limit: int):
+    def __init__(self, value: str, limit: int, variables=None):
         self.value = value
         self.limit = limit
+        self.variables = list(variables if variables is not None else cfg.VARIABLES)
+        self.pairwise = limit == 1
 
-    def violations(self, assignment):
-        holders = [v for v in cfg.VARIABLES if assignment.get(v) == self.value]
+    def violations(self, assignment, counter=None):
+        if counter is not None:
+            counter["constraint_checks"] += 1
+        holders = [v for v in self.variables if assignment.get(v) == self.value]
         if len(holders) <= self.limit:
             return []
         return [Violation("global", tuple(holders),
@@ -129,23 +141,32 @@ class CSP:
         self.neighbors: Dict[str, List[str]] = adjacency
         self.edges: List[Tuple[str, str]] = list(edges)
         self.constraints: List[Constraint] = list(constraints)
+        self.pair_constraints = [c for c in self.constraints if c.pairwise]
+        self.reset_counters()
+
+    def reset_counters(self):
+        """Reset operation counts used by headless experiments."""
+        self.check_counters = {"constraint_checks": 0, "pair_checks": 0,
+                               "assignment_checks": 0, "unary_checks": 0}
 
     # ---------- evaluasi assignment ----------
-    def all_violations(self, assignment: Assignment) -> List[Violation]:
+    def all_violations(self, assignment: Assignment, *, count=True) -> List[Violation]:
+        if count:
+            self.check_counters["assignment_checks"] += 1
         out: List[Violation] = []
         for c in self.constraints:
-            out.extend(c.violations(assignment))
+            out.extend(c.violations(assignment, counter=self.check_counters if count else None))
         return out
 
-    def violations_involving(self, assignment: Assignment, var: str) -> List[Violation]:
-        return [v for v in self.all_violations(assignment) if var in v.variables]
+    def violations_involving(self, assignment: Assignment, var: str, *, count=True) -> List[Violation]:
+        return [v for v in self.all_violations(assignment, count=count) if var in v.variables]
 
-    def total_conflicts(self, assignment: Assignment) -> int:
-        return sum(v.cost for v in self.all_violations(assignment))
+    def total_conflicts(self, assignment: Assignment, *, count=True) -> int:
+        return sum(v.cost for v in self.all_violations(assignment, count=count))
 
-    def conflicted_variables(self, assignment: Assignment) -> Set[str]:
+    def conflicted_variables(self, assignment: Assignment, *, count=True) -> Set[str]:
         out: Set[str] = set()
-        for v in self.all_violations(assignment):
+        for v in self.all_violations(assignment, count=count):
             out.update(v.variables)
         return out
 
@@ -156,8 +177,15 @@ class CSP:
         return self.is_complete(assignment) and self.total_conflicts(assignment) == 0
 
     # ---------- relasi biner (untuk AC-3 & LCV) ----------
-    def pair_ok(self, a: str, va: str, b: str, vb: str) -> bool:
-        return all(c.pair_ok(a, va, b, vb) for c in self.constraints)
+    def pair_ok(self, a: str, va: str, b: str, vb: str, *, count=True) -> bool:
+        if count:
+            self.check_counters["pair_checks"] += 1
+        for c in self.pair_constraints:
+            if count:
+                self.check_counters["constraint_checks"] += 1
+            if not c.pair_ok(a, va, b, vb):
+                return False
+        return True
 
     def constraint_graph(self, domains: Dict[str, List[str]]) -> Dict[str, Set[str]]:
         """Graf constraint: a--b bila ADA pasangan nilai (x in D(a), y in D(b))
@@ -170,6 +198,15 @@ class CSP:
                                   for x in domains[a] for y in domains[b]):
                     graph[a].add(b)
         return graph
+
+    def use_constraint_graph_for_degree(self, domains=None):
+        """Use active binary constraints for the MRV degree tie-break."""
+        if domains is None:
+            domains, _ = self.node_consistent_domains()
+        graph = self.constraint_graph(domains)
+        order = {v: i for i, v in enumerate(self.variables)}
+        self.neighbors = {v: sorted(graph[v], key=order.get) for v in self.variables}
+        self.reset_counters()
 
     def arcs(self, graph: Dict[str, Set[str]]) -> List[Tuple[str, str]]:
         return [(a, b) for a in self.variables for b in self.variables if b in graph[a]]
@@ -185,6 +222,8 @@ class CSP:
         for c in self.constraints:
             if isinstance(c, UnaryConstraint):
                 before = domains[c.variable]
+                self.check_counters["unary_checks"] += len(before)
+                self.check_counters["constraint_checks"] += len(before)
                 after = [x for x in before if x in c.allowed]
                 if after != before:
                     domains[c.variable] = after
@@ -206,8 +245,9 @@ def build_stadium_csp(scenario: str = "standar") -> CSP:
         edges, [(cfg.TUAN_RUMAH, cfg.TAMU)]))
     constraints.append(ForbiddenAdjacencyConstraint(                                      # (d)
         edges, [(x, cfg.TAMU) for x in cfg.FORBIDDEN_PREMIUM_NEIGHBORS]))
-    constraints.append(AtMostConstraint(cfg.TAMU, cfg.MAX_TAMU_SECTORS))                  # (c)
+    constraints.append(AtMostConstraint(cfg.TAMU, cfg.MAX_TAMU_SECTORS, cfg.VARIABLES))  # (c)
     domains = {v: list(cfg.DOMAIN) for v in cfg.VARIABLES}
     csp = CSP(cfg.VARIABLES, domains, cfg.RING_ORDER, adjacency, edges, constraints)
+    csp.use_constraint_graph_for_degree(csp.node_consistent_domains()[0])
     csp.scenario = scenario
     return csp

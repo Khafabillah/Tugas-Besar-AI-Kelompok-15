@@ -26,6 +26,12 @@ class Metrics:
     backtracks: int = 0   # pembatalan assignment
     arc_checks: int = 0   # jumlah REVISE yang dijalankan AC-3
     removals: int = 0     # jumlah nilai yang dihapus AC-3
+    fc_checks: int = 0    # jumlah nilai tetangga yang diperiksa forward checking
+    fc_removals: int = 0  # jumlah nilai yang dihapus forward checking
+    constraint_checks: int = 0  # predicate checks di constraint unary, biner, dan global
+    pair_checks: int = 0  # pemanggilan uji kompatibilitas pasangan nilai
+    assignment_checks: int = 0  # evaluasi seluruh constraint pada satu assignment
+    unary_checks: int = 0  # kandidat nilai yang diperiksa saat node consistency
 
 
 @dataclass
@@ -50,6 +56,7 @@ class RunResult:
     label: str
     metrics: Metrics
     success: bool
+    final_conflicts: Optional[int] = None
 
 
 @dataclass
